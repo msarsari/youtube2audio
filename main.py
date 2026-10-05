@@ -1,6 +1,5 @@
 import contextlib
 import os
-import shutil
 import sys
 import time
 
@@ -39,7 +38,7 @@ class MainPage(QMainWindow, UiMainWindow):
         self.revert_annotate.hide()
         # Activate hyperlink on upper right
         self.credit_url.linkActivated.connect(self.set_credit_url)
-        self.credit_url.setText('<a href="https://github.com/irahorecka/YouTube2Mp3">source code</a>')
+        self.credit_url.setText('<a href="https://github.com/msarsari/youtube2audio">source code</a>')
         # Connect the delete video button with the remove_selected_items fn.
         self.remove_from_table_button.clicked.connect(self.remove_selected_items)
         # Buttons connection with the appropriate functions
@@ -203,6 +202,7 @@ class MainPage(QMainWindow, UiMainWindow):
             self.save_as_mp4_box.isChecked(),
         )
         self.down.downloadCount.connect(self._download_finished)
+        self.down.downloadFailed.connect(self._download_failed)
         self.down.start()
 
     def _get_playlist_properties(self):
@@ -224,10 +224,15 @@ class MainPage(QMainWindow, UiMainWindow):
         return playlist_properties
 
     def _download_finished(self, download_time):
-        """Emit changes to MainPage once dowload is complete."""
+        """Emit changes to MainPage once download is complete."""
         _min = int(download_time // 60)
         sec = int(download_time % 60)
         self.download_status.setText(f"Download time: {_min} min. {sec} sec.")
+        self.download_button.setEnabled(True)
+
+    def _download_failed(self, error_message):
+        """Restore the UI after a yt-dlp/FFmpeg download failure."""
+        self.download_status.setText(f"Download failed: {error_message}")
         self.download_button.setEnabled(True)
 
     def load_table_content(self, row, column):
@@ -446,9 +451,10 @@ class ArtworkLoading(QThread):
 
 
 class DownloadingVideos(QThread):
-    """Download all videos from the videos_dict using the id."""
+    """Download all videos from the videos_dict using yt-dlp."""
 
-    downloadCount = pyqtSignal(float)  # attempt to emit delta_t
+    downloadCount = pyqtSignal(float)
+    downloadFailed = pyqtSignal(str)
 
     def __init__(self, videos_dict, download_path, playlist_properties, save_as_mp4, parent=None):
         QThread.__init__(self, parent)
@@ -458,36 +464,32 @@ class DownloadingVideos(QThread):
         self.save_as_mp4 = save_as_mp4
 
     def run(self):
-        """Main function, downloads videos by their id while emitting progress data"""
-        # Download
-        mp4_path = os.path.join(self.download_path, "mp4")
-        try:
-            os.mkdir(mp4_path)
-        except FileExistsError:
-            pass
-        except FileNotFoundError:
-            # If the user downloads to a folder, deletes the folder, and reattempts
-            # to download to the same folder within the same session.
-            raise RuntimeError(
-                f'"{os.path.abspath(os.path.dirname(mp4_path))}" does not exist.\nEnsure this directory exists prior to executing download.'
+        """Download the selected items without blocking the Qt UI."""
+        if not os.path.isdir(self.download_path):
+            self.downloadFailed.emit(
+                f'"{os.path.abspath(self.download_path)}" does not exist.'
             )
+            return
 
         time0 = time.time()
         video_properties = (
             (
                 key_value,
-                (self.download_path, mp4_path),
+                (self.download_path, None),
                 self.playlist_properties[index],
                 self.save_as_mp4,
             )
-            for index, key_value in enumerate(self.videos_dict.items())  # dict is naturally sorted in iteration
+            for index, key_value in enumerate(self.videos_dict.items())
         )
-        utils.map_threads(utils.thread_query_youtube, video_properties)
-        shutil.rmtree(mp4_path)  # remove mp4 dir
-        time1 = time.time()
 
-        delta_t = time1 - time0
-        self.downloadCount.emit(delta_t)
+        try:
+            # Consume the iterator so worker exceptions propagate to this QThread.
+            list(utils.map_threads(utils.thread_query_youtube, video_properties))
+        except Exception as error:
+            self.downloadFailed.emit(str(error))
+            return
+
+        self.downloadCount.emit(time.time() - time0)
 
 
 if __name__ == "__main__":

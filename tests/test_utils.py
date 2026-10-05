@@ -185,15 +185,15 @@ class testYouTubeDownload(unittest.TestCase):
             True,
         )
         self.mp3_filepath = os.path.join(self.test_dirpath, "No Time This Time.mp3")
-        self.m4a_filepath = os.path.join(self.test_dirpath, "No Time This Time.m4a")
+        self.mp4_filepath = os.path.join(self.test_dirpath, "No Time This Time.mp4")
 
     def test_get_youtube_mp4(self):
-        """Test download of mp4 file (m4a) using the setUp var above"""
+        """Test download of an MP4 file using the setUp var above"""
         try:
             download_youtube.thread_query_youtube(self.mp4_args_for_thread_query_youtube)
-            assert os.path.exists(self.m4a_filepath)
+            assert os.path.exists(self.mp4_filepath)
         finally:
-            os.remove(self.m4a_filepath)  # remove generated m4a file
+            os.remove(self.mp4_filepath)  # remove generated mp4 file
 
     def test_get_youtube_mp3(self):
         """Test download of mp3 file (mp3) using the setUp var above"""

@@ -1,35 +1,109 @@
-# **youtube2audio**
+# youtube2audio
 
-![Version](https://img.shields.io/badge/version-v2024.09.26-orange)
-[![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
-[![Licence](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/irahorecka/youtube2audio/main/LICENSE)
+A desktop GUI application for downloading YouTube videos or playlists as tagged MP3 or MP4 files.
 
-A desktop GUI application that downloads and converts YouTube videos to annotated MP3 and MP4 files.
-<br>
-<br>
-![Application Interface](docs/youtube2audio.png)
-<hr>
+## What changed in this fork
 
-## Using the application
+The media backend has been modernized around **yt-dlp + FFmpeg**:
 
-Paste a YouTube playlist or video URL and load its content. Make edits to the table and click "Ask butler" (not shown in image above) to provide annotation hints to your videos. You can choose to download MP3 or MP4 files. Finally, select a download folder, download your videos, and just like that, you have nicely annotated audio files.
+- yt-dlp handles video/playlist metadata and downloads.
+- FFmpeg handles MP3 extraction and MP4 conversion/merging.
+- `imageio-ffmpeg` provides an FFmpeg binary automatically when a system FFmpeg installation is not available.
+- Legacy `youtube-dl`, `pytube`, `pytubefix`, and MoviePy download/conversion paths were removed.
+- MP4 now produces a real `.mp4` file instead of copying a video stream to a `.m4a` filename.
+- Existing iTunes "Ask butler" metadata suggestions and cover embedding are preserved.
 
-This application uses PyQt5 to provide the user interface and multithreading to execute calls asynchronously. The backend uses ```itunespy``` to suggest song annotations (i.e. "Ask butler"), ```pytube``` to download the YouTube video as an MP4 audio file, and FFmpeg to convert the MP4 file to MP3.
+## Features
 
-Watch the <a href="https://i.imgur.com/6gAdznH.mp4">video demo</a> for more information.
-<hr>
+- Load a single YouTube video or a playlist.
+- Edit title, album, artist, genre, and artwork before downloading.
+- Use "Ask butler" to query iTunes for metadata suggestions.
+- Save audio as MP3 (currently 320 kbps).
+- Save video as MP4.
+- Embed metadata and supported JPEG/PNG artwork.
+- Keep the GUI responsive while downloads run in a background Qt thread.
 
-## Running the application
+## Requirements
 
-1) Clone GitHub repository
-2) ```pip install -r requirements.txt --upgrade```
-3) ```python main.py```
+- Python 3.10+
+- Windows, Linux, or macOS
+- Internet access
 
-Check <b>Troubleshooting</b> if you encounter any trouble running / using the application or downloading MP3 files. If undocumented exceptions occur, please file the issue in <a href="https://github.com/irahorecka/YouTube2Audio/issues">issues</a>.
-<hr>
+FFmpeg is resolved in this order:
 
-## Troubleshooting
+1. `YOUTUBE2AUDIO_FFMPEG` environment variable
+2. `ffmpeg` available on PATH
+3. the binary bundled by `imageio-ffmpeg`
 
-If the script completes instantly without downloading your video(s), you're probably experiencing an ```SSL: CERTIFICATE_VERIFY_FAIL``` exception. This fails to instantiate ```pytube.Youtube```, thus failing the download prematurely.
+## Run on Windows
 
-To troubleshoot this (if you're using macOS), go to Macintosh HD > Applications > Python3.7 folder (or whatever version of python you're using) > double click on ```Install Certificates.command``` file. This should do the trick.
+```powershell
+git clone https://github.com/msarsari/youtube2audio.git
+cd youtube2audio
+
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+python main.py
+```
+
+If PowerShell blocks activation for the current session:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+## Run on Linux/macOS
+
+```bash
+git clone https://github.com/msarsari/youtube2audio.git
+cd youtube2audio
+
+python3 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
+python main.py
+```
+
+## Notes
+
+YouTube changes frequently. Keeping yt-dlp current is the first troubleshooting step when extraction stops working:
+
+```bash
+python -m pip install -U yt-dlp
+```
+
+Use the application only for content you are permitted to download or process.
+
+## Build a standalone Windows executable
+
+From PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
+```
+
+The generated executable is written to:
+
+```text
+dist\YouTube2Audio.exe
+```
+
+The build script creates/reuses `.venv`, installs the runtime dependencies and PyInstaller, and bundles yt-dlp plus the imageio-ffmpeg binary.
+
+## Development
+
+Run tests with:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The current modernization keeps the PyQt5 interface intentionally stable. Planned follow-up work can add quality selection, per-item progress, cancellation, saved preferences, and browser cookies.

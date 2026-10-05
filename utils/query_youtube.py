@@ -1,71 +1,95 @@
-import re
-import urllib
+"""YouTube metadata queries powered by yt-dlp."""
 
-import youtube_dl
-from pytube import Playlist
-from utils._threading import map_threads
+from __future__ import annotations
+
+from typing import Dict, Iterable, Tuple
+
+from utils.ytdlp_service import extract_info, iter_video_entries, video_url_from_info
 
 
 def get_youtube_content(youtube_url, override_error):
-    """Str parse YouTube url and call appropriate functions
-    to execute url content."""
-    if ".com/playlist" in youtube_url:
-        url_tuple = get_playlist_video_info(youtube_url)
-        # concatenate override_error argument to url_tuple
-        url_tuple = tuple((url, override_error) for url in url_tuple)
-        video_genr = map_threads(get_video_info, url_tuple)
-        video_info = list(video_genr)
-    else:
-        adj_youtube_url = youtube_url.split("&")[0]  # trim ascii encoding "&"
-        # set get_video_info parameter as tuple to comply with multithreading parameter (tuple)
-        url_tuple = (adj_youtube_url, override_error)
-        video_json = get_video_info(url_tuple)
-        video_info = [video_json]
+    """Parse a YouTube video/playlist URL and return UI-compatible metadata."""
+    try:
+        info = extract_info(
+            youtube_url,
+            ignore_errors=override_error,
+            extract_flat=False,
+            noplaylist=False,
+        )
+    except RuntimeError:
+        if override_error:
+            return {}
+        raise
 
-    return video_content_to_dict(video_info)
+    return video_content_to_dict(iter_video_entries(info))
 
 
 def get_playlist_video_info(playlist_url):
-    """Get url of videos in a YouTube playlist."""
-    try:
-        playlist = Playlist(playlist_url)
-        playlist._video_regex = re.compile(
-            r"\"url\":\"(/watch\?v=[\w-]*)"
-        )  # important bug fix with recent YouTube update. See https://github.com/get-pytube/pytube3/pull/90
-    # thrown if poor internet connection or bad playlist url
-    except (urllib.error.URLError, KeyError) as error:
-        raise RuntimeError(error)
+    """Return canonical URLs for videos found in a playlist."""
+    info = extract_info(
+        playlist_url,
+        ignore_errors=True,
+        extract_flat=True,
+        noplaylist=False,
+    )
 
-    try:
-        video_urls = tuple(playlist.video_urls)
-    except AttributeError as error:
-        # if videos were queried unsuccessfully in playlist
-        raise RuntimeError(error)
+    urls = []
+    for entry in iter_video_entries(info):
+        url = video_url_from_info(entry)
+        if url:
+            urls.append(url)
 
-    return video_urls
+    return tuple(urls)
 
 
 def get_video_info(args):
-    """Get YouTube video metadata."""
-    video_url = args[0]
-    override_error = args[1]
+    """Get metadata for a single YouTube video.
 
-    ydl_opts = {"ignoreerrors": False, "quiet": True}
-    if override_error:
-        # silence youtube_dl exceptions by ignoring errors
-        ydl_opts = {"ignoreerrors": True, "quiet": True}
+    The tuple signature is preserved for compatibility with the existing UI/tests.
+    """
+    video_url, override_error = args
 
     try:
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            video_info = ydl.extract_info(video_url, download=False)
-        return video_info
-    # video unavailable or bad url format
-    except (youtube_dl.utils.DownloadError, UnicodeError) as error:
-        # catch exception here and process error:
-        # either load content again or post error label.
-        raise RuntimeError(error)
+        return extract_info(
+            video_url,
+            ignore_errors=override_error,
+            extract_flat=False,
+            noplaylist=True,
+        )
+    except RuntimeError:
+        if override_error:
+            return {}
+        raise
 
 
 def video_content_to_dict(vid_info_list):
-    """Convert YouTube metadata list to dictionary."""
-    return {video["title"]: {"id": video["id"], "duration": video["duration"]} for video in vid_info_list if video}
+    """Convert yt-dlp video info dictionaries to the structure expected by the UI.
+
+    Duplicate titles are disambiguated so playlist entries are never overwritten.
+    """
+    result: Dict[str, Dict[str, object]] = {}
+
+    for video in vid_info_list:
+        if not video:
+            continue
+
+        video_id = video.get("id")
+        if not video_id:
+            continue
+
+        title = str(video.get("title") or video_id)
+        display_title = title
+        suffix = 2
+        while display_title in result:
+            display_title = f"{title} ({suffix})"
+            suffix += 1
+
+        result[display_title] = {
+            "id": str(video_id),
+            "duration": video.get("duration") or 0,
+            "webpage_url": video_url_from_info(video),
+            "thumbnail": video.get("thumbnail"),
+            "channel": video.get("channel") or video.get("uploader"),
+        }
+
+    return result
