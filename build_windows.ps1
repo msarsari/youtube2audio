@@ -1,1 +1,45 @@
-param(\n    [switch]$Clean\n)\n\n$ErrorActionPreference = "Stop"\nSet-Location $PSScriptRoot\n\nfunction Get-PythonCommand {\n    if (Get-Command py -ErrorAction SilentlyContinue) {\n        return @("py", "-3")\n    }\n    if (Get-Command python -ErrorAction SilentlyContinue) {\n        return @("python")\n    }\n    throw "Python 3 was not found. Install Python 3.10+ and try again."\n}\n\n$pythonLauncher = Get-PythonCommand\n\nif ($Clean -and (Test-Path ".venv")) {\n    Remove-Item ".venv" -Recurse -Force\n}\n\nif (-not (Test-Path ".venv\\Scripts\\python.exe")) {\n    Write-Host "Creating virtual environment..."\n    if ($pythonLauncher.Count -eq 2) {\n        & $pythonLauncher[0] $pythonLauncher[1] -m venv .venv\n    } else {\n        & $pythonLauncher[0] -m venv .venv\n    }\n}\n\n$python = Join-Path $PSScriptRoot ".venv\\Scripts\\python.exe"\n\nWrite-Host "Installing build dependencies..."\n& $python -m pip install --upgrade pip\n& $python -m pip install -r requirements.txt\n& $python -m pip install --upgrade pyinstaller\n\nWrite-Host "Building YouTube2Audio.exe..."\n& $python -m PyInstaller --noconfirm --clean --onefile --windowed --name "YouTube2Audio" --collect-all yt_dlp --collect-all imageio_ffmpeg --add-data "img;img" main.py\n\nWrite-Host ""\nWrite-Host "Build complete:"\nWrite-Host (Join-Path $PSScriptRoot "dist\\YouTube2Audio.exe")\n
+param(
+    [switch]$Clean
+)
+
+$ErrorActionPreference = "Stop"
+Set-Location $PSScriptRoot
+
+function Get-PythonCommand {
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        return @("py", "-3")
+    }
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        return @("python")
+    }
+    throw "Python 3 was not found. Install Python 3.10+ and try again."
+}
+
+$pythonLauncher = Get-PythonCommand
+
+if ($Clean -and (Test-Path ".venv")) {
+    Remove-Item ".venv" -Recurse -Force
+}
+
+if (-not (Test-Path ".venv\Scripts\python.exe")) {
+    Write-Host "Creating virtual environment..."
+    if ($pythonLauncher.Count -eq 2) {
+        & $pythonLauncher[0] $pythonLauncher[1] -m venv .venv
+    } else {
+        & $pythonLauncher[0] -m venv .venv
+    }
+}
+
+$python = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+
+Write-Host "Installing build dependencies..."
+& $python -m pip install --upgrade pip
+& $python -m pip install -r requirements.txt
+& $python -m pip install --upgrade pyinstaller
+
+Write-Host "Building YouTube2Audio.exe..."
+& $python -m PyInstaller --noconfirm --clean --onefile --windowed --name "YouTube2Audio" --collect-all yt_dlp --collect-all imageio_ffmpeg --add-data "img;img" main.py
+
+Write-Host ""
+Write-Host "Build complete:"
+Write-Host (Join-Path $PSScriptRoot "dist\YouTube2Audio.exe")
