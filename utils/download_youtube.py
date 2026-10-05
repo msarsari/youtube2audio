@@ -1,150 +1,133 @@
-import os
-from shutil import copy2
+"""Download and tag YouTube media."""
 
-from pytubefix import YouTube
+from __future__ import annotations
+
+import os
+
 import requests
+from mutagen.id3 import APIC, ID3, TALB, TCON, TIT2, TPE1
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4, MP4Cover
-from mutagen.id3 import ID3, APIC, TALB, TPE1, TIT2, TCON
-from moviepy.editor import VideoFileClip
+
+from utils.ytdlp_service import YOUTUBE_WATCH_URL, download_media
 
 
 def thread_query_youtube(args):
-    """Download video to mp4 then mp3 -- triggered
-    by map_threads"""
+    """Download a YouTube item and apply metadata.
 
-    yt_link_starter = "https://www.youtube.com/watch?v="
+    The argument structure is kept compatible with the existing threaded UI:
+    ((title, video_dict), (download_path, legacy_temp_path), song_properties, save_as_mp4)
+    """
     _, videos_dict = args[0]
-    download_path, mp4_path = args[1]
+    download_path, _legacy_temp_path = args[1]
     song_properties = args[2]
     save_as_mp4 = args[3]
-    full_link = yt_link_starter + videos_dict["id"]
 
-    def new_get_youtube_mp3():
-        try:
-            yt = YouTube(full_link)
-            print(yt.title)
+    full_link = videos_dict.get("webpage_url") or YOUTUBE_WATCH_URL.format(video_id=videos_dict["id"])
+    output_file = download_media(
+        full_link,
+        download_path,
+        song_properties.get("song") or videos_dict.get("id") or "download",
+        save_as_mp4=save_as_mp4,
+    )
 
-            ys = yt.streams.get_audio_only()
-            ys.download(mp3=True)
-        except Exception as error:  # not a good Exceptions catch...
-            print(f"Error: {str(error)}")  # poor man's logging
-            raise RuntimeError from error
-
-    def get_youtube_mp4():
-        """Write MP4 audio file from YouTube video."""
-        try:
-            video = YouTube(full_link)
-            stream = video.streams.get_highest_resolution()
-            mp4_filename = f'{song_properties.get("song")}'
-            illegal_char = (
-                "?",
-                "'",
-                '"',
-                ".",
-                "/",
-                "\\",
-                "*",
-                "^",
-                "%",
-                "$",
-                "#",
-                "~",
-                "<",
-                ">",
-                ",",
-                ";",
-                ":",
-                "|",
-            )
-            # remove illegal characters from song title - otherwise clipped by pytube
-            for char in illegal_char:
-                mp4_filename = mp4_filename.replace(char, "")
-
-            mp4_filename += ".mp4"  # add extension for downstream file recognition
-            stream.download(mp4_path, filename=f"{mp4_filename}")
-            if save_as_mp4:
-                m4a_filename = f'{song_properties.get("song")}.m4a'
-                # Copy song from temporary folder to destination
-                copy2(
-                    os.path.join(mp4_path, mp4_filename),
-                    os.path.join(download_path, m4a_filename),
-                )
-                return set_song_metadata(download_path, song_properties, m4a_filename, True)
-
-            return get_youtube_mp3(mp4_filename)
-        except Exception as error:  # not a good Exceptions catch...
-            print(f"Error: {str(error)}")  # poor man's logging
-            raise RuntimeError from error
-
-    def get_youtube_mp3(mp4_filename):
-        """Write MP3 audio file from MP4."""
-        mp3_filename = f'{song_properties.get("song")}.mp3'
-        try:
-            video = VideoFileClip(os.path.join(mp4_path, mp4_filename))
-            video.audio.write_audiofile(os.path.join(download_path, mp3_filename))
-            set_song_metadata(download_path, song_properties, mp3_filename, False)
-        except Exception as e:
-            print(e)
-        finally:
-            video.close()
-
-    return get_youtube_mp4()
+    set_song_metadata(
+        os.path.dirname(output_file),
+        song_properties,
+        os.path.basename(output_file),
+        save_as_mp4,
+    )
+    return output_file
 
 
 def set_song_metadata(directory, song_properties, song_filename, save_as_mp4):
-    """Set song metadata."""
+    """Set song metadata and optional cover artwork."""
 
-    def write_to_mp4():
-        """Add metadata to MP4 file."""
-        # NOTE Metadata for MP4 will fail to write if any error (esp. with artwork) occurs
-        audio = MP4(os.path.join(directory, song_filename))
-        audio.tags["\xa9alb"] = song_properties["album"]
-        audio.tags["\xa9ART"] = song_properties["artist"]
-        audio.tags["\xa9nam"] = song_properties["song"]
-        audio.tags["\xa9gen"] = song_properties["genre"]
-        # Only add a cover if the response was ok and the header of the
-        # response content is that of a JPEG image. Source:
-        # https://www.file-recovery.com/jpg-signature-format.htm.
-        if valid_artwork():
-            audio.tags["covr"] = [MP4Cover(response.content, imageformat=MP4Cover.FORMAT_JPEG)]
+    response = _get_artwork(song_properties.get("artwork"))
 
-        audio.save()
+    if save_as_mp4:
+        _write_mp4_metadata(directory, song_properties, song_filename, response)
+    else:
+        _write_mp3_metadata(directory, song_properties, song_filename, response)
 
-    def write_to_mp3():
-        """Add metadata to MP3 file."""
-        audio = MP3(os.path.join(directory, song_filename), ID3=ID3)
-        audio["TALB"] = TALB(encoding=3, text=song_properties["album"])
-        audio["TPE1"] = TPE1(encoding=3, text=song_properties["artist"])
-        audio["TIT2"] = TIT2(encoding=3, text=song_properties["song"])
-        audio["TCON"] = TCON(encoding=3, text=song_properties["genre"])
-        if valid_artwork():
-            audio.tags.add(
+
+def _get_artwork(artwork_url):
+    if not artwork_url or artwork_url == "Unknown":
+        return None
+
+    try:
+        response = requests.get(artwork_url, timeout=(2, 8))
+        response.raise_for_status()
+        return response
+    except requests.RequestException:
+        return None
+
+
+def _is_jpeg(response):
+    return response is not None and response.content[:3] == b"\xff\xd8\xff"
+
+
+def _is_png(response):
+    return response is not None and response.content[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def _write_mp4_metadata(directory, song_properties, song_filename, response):
+    """Add metadata to an MP4/M4A container."""
+    audio = MP4(os.path.join(directory, song_filename))
+    if audio.tags is None:
+        audio.add_tags()
+
+    audio.tags["\xa9alb"] = [song_properties.get("album") or "Unknown"]
+    audio.tags["\xa9ART"] = [song_properties.get("artist") or "Unknown"]
+    audio.tags["\xa9nam"] = [song_properties.get("song") or "Unknown"]
+    audio.tags["\xa9gen"] = [song_properties.get("genre") or "Unknown"]
+
+    if _is_jpeg(response):
+        audio.tags["covr"] = [MP4Cover(response.content, imageformat=MP4Cover.FORMAT_JPEG)]
+    elif _is_png(response):
+        audio.tags["covr"] = [MP4Cover(response.content, imageformat=MP4Cover.FORMAT_PNG)]
+
+    audio.save()
+
+
+def _write_mp3_metadata(directory, song_properties, song_filename, response):
+    """Add ID3 metadata to an MP3 file."""
+    filepath = os.path.join(directory, song_filename)
+    audio = MP3(filepath, ID3=ID3)
+
+    if audio.tags is None:
+        audio.add_tags()
+
+    audio.tags.setall("TALB", [TALB(encoding=3, text=song_properties.get("album") or "Unknown")])
+    audio.tags.setall("TPE1", [TPE1(encoding=3, text=song_properties.get("artist") or "Unknown")])
+    audio.tags.setall("TIT2", [TIT2(encoding=3, text=song_properties.get("song") or "Unknown")])
+    audio.tags.setall("TCON", [TCON(encoding=3, text=song_properties.get("genre") or "Unknown")])
+
+    if _is_jpeg(response):
+        audio.tags.setall(
+            "APIC",
+            [
                 APIC(
-                    encoding=3,  # 3 is for utf-8
-                    mime="image/jpeg",  # image/jpeg or image/png
-                    type=3,  # 3 is for the cover image
+                    encoding=3,
+                    mime="image/jpeg",
+                    type=3,
                     desc="Cover",
                     data=response.content,
                 )
-            )
+            ],
+        )
+    elif _is_png(response):
+        audio.tags.setall(
+            "APIC",
+            [
+                APIC(
+                    encoding=3,
+                    mime="image/png",
+                    type=3,
+                    desc="Cover",
+                    data=response.content,
+                )
+            ],
+        )
 
-        audio.save()
-
-    def valid_artwork():
-        """Validate artwork requests response."""
-        return response is not None and response.status_code == 200 and response.content[:3] == b"\xff\xd8\xff"
-
-    # TODO Cache the image until program finishes
-    try:
-        # Get byte data for album artwork url. The first number in the timeout
-        # tuple is for the initial connection to the server. The second number
-        # is for the subsequent response from the server.
-        response = requests.get(song_properties["artwork"], timeout=(1, 5))
-    except requests.exceptions.MissingSchema:
-        response = None
-
-    if save_as_mp4:
-        write_to_mp4()
-    else:
-        write_to_mp3()
+    audio.save()
