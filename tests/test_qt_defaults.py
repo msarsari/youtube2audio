@@ -70,7 +70,7 @@ class testMain(unittest.TestCase):
         """Test default label on source code hyperlink"""
         self.assertEqual(
             self.form.credit_url.text(),
-            '<a href="https://github.com/irahorecka/YouTube2Mp3">source code</a>',
+            '<a href="https://github.com/msarsari/youtube2audio">source code</a>',
         )
 
 
