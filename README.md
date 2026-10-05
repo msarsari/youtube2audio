@@ -82,6 +82,22 @@ python -m pip install -U yt-dlp
 
 Use the application only for content you are permitted to download or process.
 
+## Build a standalone Windows executable
+
+From PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_windows.ps1
+```
+
+The generated executable is written to:
+
+```text
+dist\YouTube2Audio.exe
+```
+
+The build script creates/reuses `.venv`, installs the runtime dependencies and PyInstaller, and bundles yt-dlp plus the imageio-ffmpeg binary.
+
 ## Development
 
 Run tests with:
@@ -90,4 +106,4 @@ Run tests with:
 python -m unittest discover -s tests -v
 ```
 
-The current modernization keeps the PyQt5 interface intentionally stable. Planned follow-up work can add quality selection, per-item progress, cancellation, saved preferences, browser cookies, and a standalone Windows executable.
+The current modernization keeps the PyQt5 interface intentionally stable. Planned follow-up work can add quality selection, per-item progress, cancellation, saved preferences, and browser cookies.
